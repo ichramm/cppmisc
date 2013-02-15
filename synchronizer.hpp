@@ -37,6 +37,38 @@ namespace ichramm
 			typedef boost::unique_lock<synchronizer> scoped_lock;
 
 			/*!
+			 * Thrown when the \c scoped_lock object passed as parameter is not valid lock.
+			 *
+			 * A valid lock must met the following two conditions:
+			 * \li The lockable being held by the lock must be the
+			 * same \c synchronizer object on which the function is called
+			 * \li The lock must own the lock
+			 */
+			class invalid_lock
+				: public std::exception
+			{
+			public:
+
+				invalid_lock(const std::string& what)
+				 : _what(what)
+				{ }
+
+				~invalid_lock() throw()
+				{ }
+
+				/*!
+				 * Overrides \c std::exception::what
+				 */
+				const char* what() const throw()
+				{
+					return _what.c_str();
+				}
+
+			private:
+				const std::string _what;
+			};
+
+			/*!
 			 * Creates a new \c synchronizer object with condition set to \c false
 			 */
 			synchronizer()
@@ -59,16 +91,11 @@ namespace ichramm
 			 *
 			 * It really does not make much sense to call this function but
 			 * if you want it then go on...
-			 *
-			 * \remarks The lock must be held by \p lock
 			 */
 			bool is_condition_met(scoped_lock& lock)
+				throw(invalid_lock)
 			{
-				if (lock.owns_lock() == false)
-				{
-					throw std::runtime_error("Invalid lock");
-				}
-
+				lock_is_valid_or_throw(lock);
 				return _condition_met;
 			}
 
@@ -85,16 +112,11 @@ namespace ichramm
 
 			/*!
 			 * Sets the condition to true and notifies all waiters of the change
-			 *
-			 * \remarks The lock must be held by \p lock
 			 */
 			void set(scoped_lock& lock)
+				throw(invalid_lock)
 			{
-				if (lock.owns_lock() == false)
-				{
-					throw std::runtime_error("Invalid lock");
-				}
-
+				lock_is_valid_or_throw(lock);
 				_condition_met = true;
 				_condition.notify_all();
 			}
@@ -112,16 +134,11 @@ namespace ichramm
 
 			/*!
 			 * Resets the condition to \c false
-			 *
-			 * \remarks The lock must be held by \p lock
 			 */
 			void reset(scoped_lock& lock)
+				throw(invalid_lock)
 			{
-				if (lock.owns_lock() == false)
-				{
-					throw std::runtime_error("Invalid lock");
-				}
-
+				lock_is_valid_or_throw(lock);
 				_condition_met = false;
 			}
 
@@ -170,16 +187,11 @@ namespace ichramm
 
 			/*!
 			 * Waits until the condition is set using the specified lock
-			 *
-			 * \remarks The lock must be held by \p lock
 			 */
 			void wait(scoped_lock& lock)
+				throw(invalid_lock)
 			{
-				if (lock.owns_lock() == false)
-				{
-					throw std::runtime_error("Invalid lock");
-				}
-
+				lock_is_valid_or_throw(lock);
 				while (_condition_met == false)
 				{ // cope with spurious wakeups
 					_condition.wait(lock);
@@ -203,10 +215,9 @@ namespace ichramm
 			 * Waits until the condition is set or current time as reported
 			 * by \c boost::get_system_time() is greater than or equal
 			 * to \code boost::get_system_time() + timeout \endcode
-			 *
-			 * \remarks The lock must be held by \p lock
 			 */
 			bool wait(scoped_lock& lock, const boost::posix_time::time_duration& timeout)
+				throw(invalid_lock)
 			{
 				return wait(lock, boost::get_system_time() + timeout);
 			}
@@ -226,15 +237,11 @@ namespace ichramm
 			/*!
 			 * Waits until the condition is set or current time as specified
 			 * by \c boost::get_system_time() is greater than or equal to \p deadline
-			 *
-			 * \remarks The lock must be held by \p lock
 			 */
 			bool wait(scoped_lock& lock, const boost::system_time& deadline)
+				throw(invalid_lock)
 			{
-				if (lock.owns_lock() == false)
-				{
-					throw std::runtime_error("Invalid lock");
-				}
+				lock_is_valid_or_throw(lock);
 
 				while (_condition_met == false && boost::get_system_time() < deadline)
 				{ // cope with spurious wakeups
@@ -242,6 +249,21 @@ namespace ichramm
 				}
 
 				return _condition_met;
+			}
+
+		private:
+
+			void lock_is_valid_or_throw(const scoped_lock& lock) const
+			{
+				if (lock.mutex() != this)
+				{
+					throw invalid_lock("Lockable instance is invalid");
+				}
+
+				if (lock.owns_lock() == false)
+				{
+					throw invalid_lock("Lockable object doesn't own the lock");
+				}
 			}
 
 		private:
