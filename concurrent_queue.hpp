@@ -20,17 +20,53 @@ namespace ichramm
 		/*!
 		 * This class implements FIFO queue, but with concurrency.
 		 *
-		 * This means not only that this object is thread safe, but also will
-		 * block any \c pop() call when the queue is empty until a new element
-		 * is pushed into the queue or, in some overloads, the given timeout
-		 * has passed.
+		 * This means not only that this object is thread safe, but also will block
+		 * any \c pop() call when the queue is empty until a new element is pushed
+		 * into the queue or, in some overloads, the given timeout has passed.
+		 *
+		 * This class is implemented as a container adaptor, this means an encapsulated
+		 * object of a specific container class is used as its underlying container, providing
+		 * a specific set of member functions to access its elements.
+		 *
+		 * Elements are pushed into the "back" of the specific container and popped from its "front".
+		 *
+		 * The underlying container may be one of the standard container class template or
+		 * some other specifically designed container class. The only requirement is that
+		 * it supports the following operations:
+		 *
+		 * \li empty()
+		 * \li size()
+		 * \li front()
+		 * \li pop_front()
+		 * \li push_back()
+		 *
+		 * Therefore, the standard container class templates deque and list can be used. By
+		 * default, if no container class is specified for a particular concurrent_queue
+		 * class, the standard container class template std::list is used.
+		 *
+		 * The implementation has two template parameters:
+		 * \code
+		 *  template <
+		 *   class _Tp,
+		 *   class _Sequence = std::list<-Tp>
+		 *  >
+		 * class concurrent_queue;
+		 * \endcode
+		 *
+		 * Where the template parameters have the following meanings:
+		 * \li \c _Tp : Type of the elements.
+		 * \li \c _Sequence : Type of the underlying container object used to store and access the elements.
 		 */
 		template <
-			class value_type,
-			class container_type = std::list<value_type>
+			class _Tp,
+			class _Sequence = std::list<_Tp>
 		> class concurrent_queue
 		{
 		public:
+
+			typedef typename _Sequence::value_type   value_type;
+			typedef typename _Sequence::size_type    size_type;
+			typedef          _Sequence               container_type;
 
 			/*!
 			 * Thrown a wait in \c pop() has timed out
@@ -44,6 +80,7 @@ namespace ichramm
 				 * Overrides \c std::exception::what
 				 */
 				const char* what() const
+					throw()
 				{
 					return "Timed-out";
 				}
@@ -58,6 +95,16 @@ namespace ichramm
 			}
 
 			/*!
+			 * Initializes a new instance by using a copy of the
+			 * container object specified by \p src
+			 */
+			explicit concurrent_queue(const container_type& src)
+			 : _size(src.size())
+			 , _container(src)
+			{
+			}
+
+			/*!
 			 * \return \c true if the queue does not contain any elements, otherwise \c false
 			 */
 			bool empty() const
@@ -68,9 +115,18 @@ namespace ichramm
 			/*!
 			 * \return The current number of elements in the queue
 			 */
-			size_t size() const
+			size_type size() const
 			{
 				return _size;
+			}
+
+			/*!
+			 * \return A copy of the underlying container
+			 */
+			operator container_type() const
+			{
+				boost::lock_guard<boost::mutex> lock(_mutex);
+				return _container;
 			}
 
 			/*!
@@ -81,7 +137,7 @@ namespace ichramm
 			void push(const value_type& element)
 			{
 				boost::lock_guard<boost::mutex> lock(_mutex);
-				do_push(element);
+				push_one(element);
 			}
 
 			/*!
@@ -95,8 +151,8 @@ namespace ichramm
 			 */
 			value_type pop()
 			{
-				value_type _val;
-				return pop(_val);
+				value_type _result;
+				return pop(_result);
 			}
 
 			/*!
@@ -107,10 +163,9 @@ namespace ichramm
 			 * \param timeout_ms Max milliseconds to wait in case the queue is empty
 			 *
 			 * \return The first element in the queue, aka the one being popped
-			 *
-			 * \throw timeout_exception
 			 */
 			value_type pop(size_t timeout_ms)
+				throw(timeout_exception)
 			{
 				value_type _result;
 
@@ -140,7 +195,7 @@ namespace ichramm
 					_condition.wait(lock);
 				}
 
-				do_pop(result);
+				result = pop_one();
 				return result;
 			}
 
@@ -171,7 +226,7 @@ namespace ichramm
 					}
 				}
 
-				do_pop(result);
+				result = pop_one();
 				return true;
 			}
 
@@ -180,25 +235,28 @@ namespace ichramm
 			 */
 			void clear()
 			{
-				container_type tmp;
 				boost::lock_guard<boost::mutex> lock(_mutex);
-				std::swap(_container, tmp);
+				while ( !_container.empty() )
+				{
+					pop_one();
+				}
 			}
 
 		private:
 
-			void do_push(const value_type &element)
+			void push_one(const value_type &element)
 			{
 				++_size;
 				_container.push_back(element);
 				_condition.notify_one();
 			}
 
-			void do_pop(value_type &result)
+			value_type pop_one()
 			{
-				result = _container.front();
+				value_type _result = _container.front();
 				_container.pop_front();
 				--_size;
+				return _result;
 			}
 
 			atomic_counter       _size;
@@ -210,4 +268,3 @@ namespace ichramm
 }
 
 #endif // ichramm_utils_concurrent_queue_hpp__
-
