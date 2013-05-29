@@ -4,8 +4,8 @@
  *
  * Created on August 3, 2010, 2:53 PM
  */
-#ifndef ichramm_utils_concurrent_queue_hpp__
-#define ichramm_utils_concurrent_queue_hpp__
+#ifndef threadpool_utils_concurrent_queue_hpp__
+#define threadpool_utils_concurrent_queue_hpp__
 
 #include <list>
 #include <boost/thread/mutex.hpp>
@@ -13,7 +13,12 @@
 
 #include "atomic.hpp"
 
-namespace ichramm
+#if _MSC_VER > 1000
+# pragma warning(push)
+# pragma warning(disable: 4290) // C++ exception specification ignored except to indicate a function is not __declspec(nothrow)
+#endif
+
+namespace threadpool
 {
 	namespace utils
 	{
@@ -87,10 +92,28 @@ namespace ichramm
 			};
 
 			/*!
+			 * Predicate used as argument to \c condition::wait
+			 */
+			class predicate_have_elements
+			{
+				container_type &_container;
+			public:
+				predicate_have_elements(container_type &c)
+				 : _container(c)
+				{ }
+
+				bool operator()() const
+				{
+					return !_container.empty();
+				}
+			};
+
+			/*!
 			 * Initializes an empty queue
 			 */
 			concurrent_queue()
 			 : _size(0)
+			 , _have_elements(_container)
 			{
 			}
 
@@ -101,6 +124,7 @@ namespace ichramm
 			explicit concurrent_queue(const container_type& src)
 			 : _size(src.size())
 			 , _container(src)
+			 , _have_elements(_container)
 			{
 			}
 
@@ -190,10 +214,7 @@ namespace ichramm
 			{
 				boost::unique_lock<boost::mutex> lock(_mutex);
 
-				while ( _container.empty() )
-				{
-					_condition.wait(lock);
-				}
+				_condition.wait(lock, _have_elements);
 
 				result = pop_one();
 				return result;
@@ -213,17 +234,12 @@ namespace ichramm
 			{
 				boost::unique_lock<boost::mutex> lock(_mutex);
 
-				if ( _container.empty() )
-				{
-					boost::system_time deadline = boost::get_system_time() +
+				boost::system_time deadline = boost::get_system_time() +
 							boost::posix_time::milliseconds(timeout_ms);
-					while ( _container.empty() )
-					{
-						if ( !_condition.timed_wait(lock, deadline) )
-						{
-							return false;
-						}
-					}
+
+				if ( !_condition.timed_wait(lock, deadline, _have_elements) )
+				{
+					return false;
 				}
 
 				result = pop_one();
@@ -236,7 +252,7 @@ namespace ichramm
 			void clear()
 			{
 				boost::lock_guard<boost::mutex> lock(_mutex);
-				while ( !_container.empty() )
+				while ( _have_elements() )
 				{
 					pop_one();
 				}
@@ -259,12 +275,17 @@ namespace ichramm
 				return _result;
 			}
 
-			atomic_counter       _size;
-			container_type       _container;
-			mutable boost::mutex _mutex;
-			boost::condition     _condition;
+			atomic_counter           _size;
+			container_type           _container;
+			predicate_have_elements  _have_elements;
+			mutable boost::mutex     _mutex;
+			boost::condition         _condition;
 		};
 	}
 }
 
-#endif // ichramm_utils_concurrent_queue_hpp__
+#if _MSC_VER > 1000
+# pragma warning(pop)
+#endif
+
+#endif // threadpool_utils_concurrent_queue_hpp__

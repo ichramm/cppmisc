@@ -1,17 +1,17 @@
 /*!
- * \file   synchronizer.hpp
+ * \file   sync.hpp
  * \author ichramm
  *
  * Created on January 14, 2013, 9:15 PM
  */
-#ifndef ichramm_utils_synchronizer_hpp__
-#define ichramm_utils_synchronizer_hpp__
+#ifndef threadpool_utils_sync_hpp__
+#define threadpool_utils_sync_hpp__
 
 #include <boost/noncopyable.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/condition.hpp>
 
-namespace ichramm
+namespace threadpool
 {
 	namespace utils
 	{
@@ -26,7 +26,7 @@ namespace ichramm
 		 * wakeups so the user does not have to worry about checking
 		 * whether the condition was actually set or not.
 		 */
-		class synchronizer
+		class sync
 			: private boost::noncopyable
 		{
 		public:
@@ -34,7 +34,7 @@ namespace ichramm
 			/*!
 			 * Lockable concept
 			 */
-			typedef boost::unique_lock<synchronizer> scoped_lock;
+			typedef boost::unique_lock<sync> scoped_lock;
 
 			/*!
 			 * Thrown when the \c scoped_lock object passed as parameter is not valid lock.
@@ -69,10 +69,28 @@ namespace ichramm
 			};
 
 			/*!
+			 * Predicate used as argument to \c condition::wait
+			 */
+			class predicate_condition_met
+			{
+				bool &_condition_met;
+			public:
+				predicate_condition_met(bool &b)
+				 : _condition_met(b)
+				{ }
+
+				bool operator()() const
+				{
+					return _condition_met;
+				}
+			};
+
+			/*!
 			 * Creates a new \c synchronizer object with condition set to \c false
 			 */
-			synchronizer()
+			sync()
 			 : _condition_met(false)
+			 , _is_condition_met(_condition_met)
 			{ }
 
 			/*!
@@ -107,7 +125,7 @@ namespace ichramm
 			void set()
 			{
 				scoped_lock lock(*this);
-				set(lock);
+				internal_set();
 			}
 
 			/*!
@@ -117,8 +135,7 @@ namespace ichramm
 				throw(invalid_lock)
 			{
 				lock_is_valid_or_throw(lock);
-				_condition_met = true;
-				_condition.notify_all();
+				internal_set();
 			}
 
 			/*!
@@ -129,7 +146,7 @@ namespace ichramm
 			void reset()
 			{
 				scoped_lock lock(*this);
-				reset(lock);
+				internal_reset();
 			}
 
 			/*!
@@ -139,7 +156,7 @@ namespace ichramm
 				throw(invalid_lock)
 			{
 				lock_is_valid_or_throw(lock);
-				_condition_met = false;
+				internal_reset();
 			}
 
 			/*!
@@ -182,7 +199,7 @@ namespace ichramm
 			void wait()
 			{
 				scoped_lock lock(*this);
-				wait(lock);
+				internal_wait(lock);
 			}
 
 			/*!
@@ -192,10 +209,7 @@ namespace ichramm
 				throw(invalid_lock)
 			{
 				lock_is_valid_or_throw(lock);
-				while (_condition_met == false)
-				{ // cope with spurious wakeups
-					_condition.wait(lock);
-				}
+				internal_wait(lock);
 			}
 
 			/*!
@@ -208,7 +222,7 @@ namespace ichramm
 			bool wait(const boost::posix_time::time_duration& timeout)
 			{
 				scoped_lock lock(*this);
-				return wait(lock, timeout);
+				return internal_wait(lock, boost::get_system_time() + timeout);
 			}
 
 			/*!
@@ -219,7 +233,8 @@ namespace ichramm
 			bool wait(scoped_lock& lock, const boost::posix_time::time_duration& timeout)
 				throw(invalid_lock)
 			{
-				return wait(lock, boost::get_system_time() + timeout);
+				lock_is_valid_or_throw(lock);
+				return internal_wait(lock, boost::get_system_time() + timeout);
 			}
 
 			/*!
@@ -231,7 +246,7 @@ namespace ichramm
 			bool wait(const boost::system_time& deadline)
 			{
 				scoped_lock lock(*this);
-				return wait(lock, deadline);
+				return internal_wait(lock, deadline);
 			}
 
 			/*!
@@ -242,13 +257,7 @@ namespace ichramm
 				throw(invalid_lock)
 			{
 				lock_is_valid_or_throw(lock);
-
-				while (_condition_met == false && boost::get_system_time() < deadline)
-				{ // cope with spurious wakeups
-					_condition.timed_wait(lock, deadline);
-				}
-
-				return _condition_met;
+				return internal_wait(lock, deadline);
 			}
 
 		private:
@@ -266,13 +275,34 @@ namespace ichramm
 				}
 			}
 
+			void internal_set()
+			{
+				_condition_met = true;
+				_condition.notify_all();
+			}
+
+			void internal_reset()
+			{
+				_condition_met = false;
+			}
+
+			void internal_wait(scoped_lock& lock)
+			{
+				return _condition.wait(lock, _is_condition_met);
+			}
+
+			bool internal_wait(scoped_lock& lock, const boost::system_time& deadline)
+			{
+				return _condition.timed_wait(lock, deadline, _is_condition_met);
+			}
+
 		private:
-			bool                 _condition_met;
-			boost::condition     _condition;
-			mutable boost::mutex _sync_mutex;
+			bool                    _condition_met;
+			predicate_condition_met _is_condition_met;
+			boost::condition        _condition;
+			mutable boost::mutex    _sync_mutex;
 		};
 	}
 }
 
-#endif // ichramm_utils_synchronizer_hpp__
-
+#endif // threadpool_utils_sync_hpp__
