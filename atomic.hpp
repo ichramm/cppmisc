@@ -1,5 +1,5 @@
 /*!
- * \file atomic.h
+ * \file atomic.hpp
  * \author ichramm
  *
  * Created on December 28, 2012, 09:50 PM
@@ -18,4 +18,3 @@ namespace ichramm
 }
 
 #endif // ichramm_utils_atomic_hpp__
-

@@ -4,8 +4,8 @@
  *
  * Created on August 3, 2010, 2:53 PM
  */
-#ifndef threadpool_utils_concurrent_queue_hpp__
-#define threadpool_utils_concurrent_queue_hpp__
+#ifndef ichramm_utils_concurrent_queue_hpp__
+#define ichramm_utils_concurrent_queue_hpp__
 
 #include <list>
 #include <boost/thread/mutex.hpp>
@@ -18,7 +18,7 @@
 # pragma warning(disable: 4290) // C++ exception specification ignored except to indicate a function is not __declspec(nothrow)
 #endif
 
-namespace threadpool
+namespace ichramm
 {
 	namespace utils
 	{
@@ -106,6 +106,12 @@ namespace threadpool
 				{
 					return !_container.empty();
 				}
+
+			private:
+				// warning C4512: 'ichramm::utils::concurrent_queue<_Tp>::predicate_have_elements' : assignment operator could not be generated
+				predicate_have_elements& operator=(const predicate_have_elements&) {
+					return *this;
+				}
 			};
 
 			/*!
@@ -167,7 +173,7 @@ namespace threadpool
 			/*!
 			 * Gets and removes an element from the front of the queue. If the
 			 * queue is empty this function blocks until a new element is pushed
-			 * into the stack.
+			 * into the queue.
 			 *
 			 * This is the recommended popping method when used wisely.
 			 *
@@ -175,8 +181,11 @@ namespace threadpool
 			 */
 			value_type pop()
 			{
-				value_type _result;
-				return pop(_result);
+				boost::unique_lock<boost::mutex> lock(_mutex);
+
+				_condition.wait(lock, _have_elements);
+
+				return pop_one();
 			}
 
 			/*!
@@ -199,25 +208,6 @@ namespace threadpool
 				}
 
 				return _result;
-			}
-
-			/*!
-			 * Gets and removes an element from the front of the queue. If the
-			 * queue is empty this function blocks until a new element is pushed
-			 * into the stack.
-			 *
-			 * \param result Set with the element being popped.
-			 *
-			 * \return \p result
-			 */
-			value_type& pop(value_type &result)
-			{
-				boost::unique_lock<boost::mutex> lock(_mutex);
-
-				_condition.wait(lock, _have_elements);
-
-				result = pop_one();
-				return result;
 			}
 
 			/*!
@@ -288,4 +278,4 @@ namespace threadpool
 # pragma warning(pop)
 #endif
 
-#endif // threadpool_utils_concurrent_queue_hpp__
+#endif // ichramm_utils_concurrent_queue_hpp__
