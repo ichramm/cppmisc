@@ -21,6 +21,9 @@ namespace ichramm
 		 * It helps to synchronize two or more threads when a thread
 		 * has to met certain condition and the other(s) have to
 		 * wait until the condition is met. (i.e. the event actually happens)
+         *
+         * TODO: This should be called MONITOR
+         * FIXME: This is useless aunles the predicate is implemented as a callback or something
 		 */
 		class event
 			: private boost::noncopyable
